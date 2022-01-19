@@ -2,7 +2,7 @@
  *
  * FocalTech TouchScreen driver.
  *
- * Copyright (c) 2012-2019, FocalTech Systems, Ltd., all rights reserved.
+ * Copyright (c) 2012-2020, FocalTech Systems, Ltd., all rights reserved.
  *
  * This software is licensed under the terms of the GNU General Public
  * License version 2, as published by the Free Software Foundation, and
@@ -51,17 +51,17 @@
 * Private enumerations, structures and unions using typedef
 *****************************************************************************/
 struct fts_esdcheck_st {
-	u8  mode                : 1;    /* 1- need check esd 0- no esd check */
-	u8  suspend             : 1;
-	u8  proc_debug          : 1;    /* apk or adb use */
-	u8  intr                : 1;    /* 1- Interrupt trigger */
-	u8  unused              : 4;
-	u8  intr_cnt;
-	u8  flow_work_hold_cnt;         /* Flow Work Cnt(reg0x91) keep a same value for x times. >=5 times is ESD, need reset */
-	u8  flow_work_cnt_last;         /* Save Flow Work Cnt(reg0x91) value */
-	u32 hardware_reset_cnt;
-	u32 nack_cnt;
-	u32 dataerror_cnt;
+	u8      mode                : 1;    /* 1- need check esd 0- no esd check */
+	u8      suspend             : 1;
+	u8      proc_debug          : 1;    /* apk or adb use */
+	u8      intr                : 1;    /* 1- Interrupt trigger */
+	u8      unused              : 4;
+	u8      intr_cnt;
+	u8      flow_work_hold_cnt;         /* Flow Work Cnt(reg0x91) keep a same value for x times. >=5 times is ESD, need reset */
+	u8      flow_work_cnt_last;         /* Save Flow Work Cnt(reg0x91) value */
+	u32     hardware_reset_cnt;
+	u32     nack_cnt;
+	u32     dataerror_cnt;
 };
 
 /*****************************************************************************
@@ -89,7 +89,7 @@ int idc_esdcheck_lcderror(struct fts_ts_data *ts_data)
 	u8 val = 0;
 
 	FTS_DEBUG("check LCD ESD");
-	if ( (tp_need_recovery == 1) && (lcd_need_reset == 0) ) {
+	if ((tp_need_recovery == 1) && (lcd_need_reset == 0)) {
 		tp_need_recovery = 0;
 		/* LCD reset, need recover TP state */
 		fts_release_all_finger();
@@ -97,7 +97,7 @@ int idc_esdcheck_lcderror(struct fts_ts_data *ts_data)
 	}
 
 	ret = fts_read_reg(FTS_REG_ESD_SATURATE, &val);
-	if ( ret < 0) {
+	if (ret < 0) {
 		FTS_ERROR("read reg0xED fail,ret:%d", ret);
 		return -EIO;
 	}
@@ -176,9 +176,9 @@ static bool get_chip_id(struct fts_ts_data *ts_data)
 *****************************************************************************/
 static bool get_flow_cnt(struct fts_ts_data *ts_data)
 {
-	int ret = 0;
-	u8  reg_value = 0;
-	u8  reg_addr = 0;
+	int     ret = 0;
+	u8      reg_value = 0;
+	u8      reg_addr = 0;
 
 	reg_addr = FTS_REG_FLOW_WORK_CNT;
 	ret = fts_read(&reg_addr, 1, &reg_value, 1);
@@ -186,9 +186,9 @@ static bool get_flow_cnt(struct fts_ts_data *ts_data)
 		FTS_ERROR("read reg0x91 fail,ret:%d", ret);
 		fts_esdcheck_data.nack_cnt++;
 	} else {
-		if ( reg_value == fts_esdcheck_data.flow_work_cnt_last ) {
+		if (reg_value == fts_esdcheck_data.flow_work_cnt_last) {
 			FTS_DEBUG("reg0x91,val:%x,last:%x", reg_value,
-				fts_esdcheck_data.flow_work_cnt_last);
+					  fts_esdcheck_data.flow_work_cnt_last);
 			fts_esdcheck_data.flow_work_hold_cnt++;
 		} else {
 			fts_esdcheck_data.flow_work_hold_cnt = 0;
@@ -197,7 +197,7 @@ static bool get_flow_cnt(struct fts_ts_data *ts_data)
 		fts_esdcheck_data.flow_work_cnt_last = reg_value;
 	}
 
-		/* Flow Work Cnt keep a value for 5 times, need execute TP reset */
+	/* Flow Work Cnt keep a value for 5 times, need execute TP reset */
 	if (fts_esdcheck_data.flow_work_hold_cnt >= 5) {
 		FTS_DEBUG("reg0x91 keep a value for 5 times, need execute TP reset");
 		return true;
@@ -208,10 +208,10 @@ static bool get_flow_cnt(struct fts_ts_data *ts_data)
 
 static int esdcheck_algorithm(struct fts_ts_data *ts_data)
 {
-	int  ret = 0;
-	u8   reg_value = 0;
-	u8   reg_addr = 0;
-	bool hardware_reset = 0;
+	int     ret = 0;
+	u8      reg_value = 0;
+	u8      reg_addr = 0;
+	bool    hardware_reset = 0;
 
 	/* 1. esdcheck is interrupt, then return */
 	if (fts_esdcheck_data.intr == 1) {
@@ -241,9 +241,9 @@ static int esdcheck_algorithm(struct fts_ts_data *ts_data)
 	/* 4. In factory mode, can't check esd */
 	reg_addr = FTS_REG_WORKMODE;
 	ret = fts_read_reg(reg_addr, &reg_value);
-	if ( ret < 0 ) {
+	if (ret < 0) {
 		fts_esdcheck_data.nack_cnt++;
-	} else if ( (reg_value & 0x70) !=  FTS_REG_WORKMODE_WORK_VALUE) {
+	} else if ((reg_value & 0x70) !=  FTS_REG_WORKMODE_WORK_VALUE) {
 		FTS_DEBUG("not in work mode(%x), no check esd", reg_value);
 		return 0;
 	}
@@ -264,9 +264,9 @@ static int esdcheck_algorithm(struct fts_ts_data *ts_data)
 	/* 8. If need hardware reset, then handle it here */
 	if (hardware_reset == 1) {
 		FTS_DEBUG("NoACK=%d, Error Data=%d, Hardware Reset=%d",
-				fts_esdcheck_data.nack_cnt,
-				fts_esdcheck_data.dataerror_cnt,
-				fts_esdcheck_data.hardware_reset_cnt);
+				  fts_esdcheck_data.nack_cnt,
+				  fts_esdcheck_data.dataerror_cnt,
+				  fts_esdcheck_data.hardware_reset_cnt);
 		fts_esdcheck_tp_reset(ts_data);
 	}
 
@@ -276,14 +276,14 @@ static int esdcheck_algorithm(struct fts_ts_data *ts_data)
 static void esdcheck_func(struct work_struct *work)
 {
 	struct fts_ts_data *ts_data = container_of(work,
-					struct fts_ts_data, esdcheck_work.work);
+								  struct fts_ts_data, esdcheck_work.work);
 
 	if (ENABLE == fts_esdcheck_data.mode) {
 		esdcheck_algorithm(ts_data);
-		queue_delayed_work(ts_data->ts_workqueue,
-				&ts_data->esdcheck_work,
-				msecs_to_jiffies(ESDCHECK_WAIT_TIME));
+		queue_delayed_work(ts_data->ts_workqueue, &ts_data->esdcheck_work,
+						   msecs_to_jiffies(ESDCHECK_WAIT_TIME));
 	}
+
 }
 
 int fts_esdcheck_set_intr(bool intr)
@@ -334,8 +334,8 @@ int fts_esdcheck_switch(bool enable)
 			fts_esdcheck_data.intr = 0;
 			fts_esdcheck_data.intr_cnt = 0;
 			queue_delayed_work(ts_data->ts_workqueue,
-					&ts_data->esdcheck_work,
-					msecs_to_jiffies(ESDCHECK_WAIT_TIME));
+							   &ts_data->esdcheck_work,
+							   msecs_to_jiffies(ESDCHECK_WAIT_TIME));
 		} else {
 			FTS_DEBUG("ESD check stop");
 			cancel_delayed_work_sync(&ts_data->esdcheck_work);
@@ -357,7 +357,7 @@ int fts_esdcheck_suspend(void)
 	return 0;
 }
 
-int fts_esdcheck_resume( void )
+int fts_esdcheck_resume(void)
 {
 	FTS_FUNC_ENTER();
 	fts_esdcheck_switch(ENABLE);
@@ -396,8 +396,8 @@ static ssize_t fts_esdcheck_show(
 	struct input_dev *input_dev = fts_data->input_dev;
 
 	mutex_lock(&input_dev->mutex);
-	count = snprintf(buf, PAGE_SIZE, "Esd check: %s\n", \
-			fts_esdcheck_get_status() ? "On" : "Off");
+	count = snprintf(buf, PAGE_SIZE, "Esd check: %s\n",
+					 fts_esdcheck_get_status() ? "On" : "Off");
 	mutex_unlock(&input_dev->mutex);
 
 	return count;
@@ -425,7 +425,7 @@ int fts_create_esd_sysfs(struct device *dev)
 	int ret = 0;
 
 	ret = sysfs_create_group(&dev->kobj, &fts_esd_group);
-	if ( ret != 0) {
+	if (ret != 0) {
 		FTS_ERROR("fts_create_esd_sysfs(sysfs) create fail");
 		sysfs_remove_group(&dev->kobj, &fts_esd_group);
 		return ret;
@@ -440,7 +440,7 @@ int fts_esdcheck_init(struct fts_ts_data *ts_data)
 	if (ts_data->ts_workqueue) {
 		INIT_DELAYED_WORK(&ts_data->esdcheck_work, esdcheck_func);
 	} else {
-		FTS_ERROR("fts workqueue is NULL, can't run esd check func!");
+		FTS_ERROR("fts workqueue is NULL, can't run esd check function");
 		return -EINVAL;
 	}
 
@@ -460,6 +460,5 @@ int fts_esdcheck_exit(struct fts_ts_data *ts_data)
 	sysfs_remove_group(&ts_data->dev->kobj, &fts_esd_group);
 	return 0;
 }
-
 #endif /* FTS_ESDCHECK_EN */
 

@@ -2,7 +2,7 @@
  *
  * FocalTech TouchScreen driver.
  *
- * Copyright (c) 2012-2019, Focaltech Ltd. All rights reserved.
+ * Copyright (c) 2012-2020, Focaltech Ltd. All rights reserved.
  *
  * This software is licensed under the terms of the GNU General Public
  * License version 2, as published by the Free Software Foundation, and
@@ -57,6 +57,7 @@
 #define GESTURE_UP                              0x22
 #define GESTURE_DOWN                            0x23
 #define GESTURE_DOUBLECLICK                     0x24
+#define GESTURE_SINGLETAP                       0x25
 #define GESTURE_O                               0x30
 #define GESTURE_W                               0x31
 #define GESTURE_M                               0x32
@@ -109,7 +110,7 @@ static ssize_t fts_gesture_show(
 	mutex_lock(&ts_data->input_dev->mutex);
 	fts_read_reg(FTS_REG_GESTURE_EN, &val);
 	count = snprintf(buf, PAGE_SIZE, "Gesture Mode:%s\n",
-			ts_data->gesture_mode ? "On" : "Off");
+					 ts_data->gesture_mode ? "On" : "Off");
 	count += snprintf(buf + count, PAGE_SIZE, "Reg(0xD0)=%d\n", val);
 	mutex_unlock(&ts_data->input_dev->mutex);
 
@@ -146,14 +147,13 @@ static ssize_t fts_gesture_buf_show(
 	mutex_lock(&input_dev->mutex);
 	count = snprintf(buf, PAGE_SIZE, "Gesture ID:%d\n", gesture->gesture_id);
 	count += snprintf(buf + count, PAGE_SIZE, "Gesture PointNum:%d\n",
-			gesture->point_num);
+					  gesture->point_num);
 	count += snprintf(buf + count, PAGE_SIZE, "Gesture Points Buffer:\n");
 
 	/* save point data,max:6 */
 	for (i = 0; i < FTS_GESTURE_POINTS_MAX; i++) {
 		count += snprintf(buf + count, PAGE_SIZE, "%3d(%4d,%4d) ", i,
-			gesture->coordinate_x[i], gesture->coordinate_y[i]);
-
+						  gesture->coordinate_x[i], gesture->coordinate_y[i]);
 		if ((i + 1) % 4 == 0)
 			count += snprintf(buf + count, PAGE_SIZE, "\n");
 	}
@@ -177,12 +177,12 @@ static ssize_t fts_gesture_buf_store(
  *
  */
 static DEVICE_ATTR(fts_gesture_mode, S_IRUGO | S_IWUSR, fts_gesture_show,
-			fts_gesture_store);
+				   fts_gesture_store);
 /*
  *   read example: cat fts_gesture_buf        --- read gesture buf
  */
 static DEVICE_ATTR(fts_gesture_buf, S_IRUGO | S_IWUSR,
-			fts_gesture_buf_show, fts_gesture_buf_store);
+				   fts_gesture_buf_show, fts_gesture_buf_store);
 
 static struct attribute *fts_gesture_mode_attrs[] = {
 	&dev_attr_fts_gesture_mode.attr,
@@ -217,65 +217,52 @@ static void fts_gesture_report(struct input_dev *input_dev, int gesture_id)
 	case GESTURE_LEFT:
 		gesture = KEY_GESTURE_LEFT;
 		break;
-
 	case GESTURE_RIGHT:
 		gesture = KEY_GESTURE_RIGHT;
 		break;
-
 	case GESTURE_UP:
 		gesture = KEY_GESTURE_UP;
 		break;
-
 	case GESTURE_DOWN:
 		gesture = KEY_GESTURE_DOWN;
 		break;
-
 	case GESTURE_DOUBLECLICK:
-		gesture = KEY_POWER;
-
+		gesture = KEY_WAKEUP;
 		break;
-
+	case GESTURE_SINGLETAP:
+		gesture = KEY_GOTO;
+		break;
 	case GESTURE_O:
 		gesture = KEY_GESTURE_O;
 		break;
-
 	case GESTURE_W:
 		gesture = KEY_GESTURE_W;
 		break;
-
 	case GESTURE_M:
 		gesture = KEY_GESTURE_M;
 		break;
-
 	case GESTURE_E:
 		gesture = KEY_GESTURE_E;
 		break;
-
 	case GESTURE_L:
 		gesture = KEY_GESTURE_L;
 		break;
-
 	case GESTURE_S:
 		gesture = KEY_GESTURE_S;
 		break;
-
 	case GESTURE_V:
 		gesture = KEY_GESTURE_V;
 		break;
-
 	case GESTURE_Z:
 		gesture = KEY_GESTURE_Z;
 		break;
-
-	case GESTURE_C:
+	case  GESTURE_C:
 		gesture = KEY_GESTURE_C;
 		break;
-
 	default:
 		gesture = -1;
 		break;
 	}
-
 	/* report event key */
 	if (gesture != -1) {
 		FTS_DEBUG("Gesture Code=%d", gesture);
@@ -313,35 +300,42 @@ int fts_gesture_readdata(struct fts_ts_data *ts_data, u8 *data)
 		return 1;
 	}
 
+	if (!data) {
+		FTS_ERROR("gesture data buffer is null");
+		ret = -EINVAL;
+		return ret;
+	}
 
-	ret = fts_read_reg(FTS_REG_GESTURE_EN, &buf[0]);
-	if ((ret < 0) || (buf[0] != ENABLE)) {
+	memcpy(buf, data, FTS_GESTURE_DATA_LEN);
+	if (buf[0] != ENABLE) {
 		FTS_DEBUG("gesture not enable in fw, don't process gesture");
 		return 1;
 	}
 
-	buf[2] = FTS_REG_GESTURE_OUTPUT_ADDRESS;
-	ret = fts_read(&buf[2], 1, &buf[2], FTS_GESTURE_DATA_LEN - 2);
-	if (ret < 0) {
-		FTS_ERROR("read gesture header data fail");
-		return ret;
-	}
 
 	/* init variable before read gesture point */
 	memset(gesture->coordinate_x, 0, FTS_GESTURE_POINTS_MAX * sizeof(u16));
 	memset(gesture->coordinate_y, 0, FTS_GESTURE_POINTS_MAX * sizeof(u16));
 	gesture->gesture_id = buf[2];
 	gesture->point_num = buf[3];
-	FTS_DEBUG("gesture_id=%d, point_num=%d",
-		gesture->gesture_id, gesture->point_num);
+
+	FTS_DEBUG("gesture_id=%d, point_num=%d", gesture->gesture_id, gesture->point_num);
+
+	if (gesture->gesture_id == GESTURE_DOUBLECLICK && !(ts_data->gesture_status & 0x01)) {
+		FTS_INFO("double click is not enabled!");
+		return 0;
+	} else if (gesture->gesture_id == GESTURE_SINGLETAP && !(ts_data->gesture_status & 0x02)) {
+		FTS_INFO("single tap is not enabled!");
+		return 0;
+	}
 
 	/* save point data,max:6 */
 	for (i = 0; i < FTS_GESTURE_POINTS_MAX; i++) {
 		index = 4 * i + 4;
 		gesture->coordinate_x[i] = (u16)(((buf[0 + index] & 0x0F) << 8)
-						+ buf[1 + index]);
+										 + buf[1 + index]);
 		gesture->coordinate_y[i] = (u16)(((buf[2 + index] & 0x0F) << 8)
-						+ buf[3 + index]);
+										 + buf[3 + index]);
 	}
 
 	/* report gesture to OS */

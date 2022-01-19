@@ -2,7 +2,7 @@
  *
  * FocalTech fts TouchScreen driver.
  *
- * Copyright (c) 2012-2019, Focaltech Ltd. All rights reserved.
+ * Copyright (c) 2012-2020, Focaltech Ltd. All rights reserved.
  *
  * This software is licensed under the terms of the GNU General Public
  * License version 2, as published by the Free Software Foundation, and
@@ -36,7 +36,7 @@
 /*****************************************************************************
 * Macro definitions using #define
 *****************************************************************************/
-#define FTS_DRIVER_VERSION      "Focaltech V3.1 20190807"
+#define FTS_DRIVER_VERSION                  "Focaltech V3.2 20200422"
 
 #define BYTE_OFF_0(x)           (u8)((x) & 0xFF)
 #define BYTE_OFF_8(x)           (u8)(((x) >> 8) & 0xFF)
@@ -54,7 +54,7 @@
 #define FTS_CHIP_IDC            ((FTS_CHIP_TYPE & FLAGBIT(FLAG_IDC_BIT)) == FLAGBIT(FLAG_IDC_BIT))
 #define FTS_HID_SUPPORTTED      ((FTS_CHIP_TYPE & FLAGBIT(FLAG_HID_BIT)) == FLAGBIT(FLAG_HID_BIT))
 
-#define FTS_CHIP_TYPE_MAPPING {{0x81, 0x54, 0x52, 0x54, 0x52, 0x00, 0x00, 0x54, 0x5C}}
+#define FTS_CHIP_TYPE_MAPPING {{0x88, 0x56, 0x52, 0x00, 0x00, 0x00, 0x00, 0x56, 0xB2}}
 
 #define FILE_NAME_LENGTH                    128
 #define ENABLE                              1
@@ -67,6 +67,7 @@
 #define FTS_CMD_READ_ID                     0x90
 #define FTS_CMD_READ_ID_LEN                 4
 #define FTS_CMD_READ_ID_LEN_INCELL          1
+#define FTS_CMD_READ_FW_CONF                0xA8
 /*register address*/
 #define FTS_REG_INT_CNT                     0x8F
 #define FTS_REG_FLOW_WORK_CNT               0x91
@@ -88,13 +89,25 @@
 #define FTS_REG_IDE_PARA_STATUS             0xB6
 #define FTS_REG_GLOVE_MODE_EN               0xC0
 #define FTS_REG_COVER_MODE_EN               0xC1
-#define FTS_REG_REPORT_RATE                 0x88
 #define FTS_REG_CHARGER_MODE_EN             0x8B
 #define FTS_REG_GESTURE_EN                  0xD0
 #define FTS_REG_GESTURE_OUTPUT_ADDRESS      0xD3
 #define FTS_REG_MODULE_ID                   0xE3
 #define FTS_REG_LIC_VER                     0xE4
 #define FTS_REG_ESD_SATURATE                0xED
+
+#define FTS_REG_SENSIVITY                   0x9d
+#define FTS_REG_THDIFF                      0x85
+#define FTS_REG_MONITOR_MODE                0x86
+#define FTS_REG_TIME_ENTER_MONITOR		0x87
+#define FTS_REG_ORIENTATION                 0x8c
+#define FTS_REG_EDGE_FILTER_LEVEL           0x9c
+#define FTS_REG_GAMEMODE                    0xc1
+
+#define FTS_PALM_EN                         0x9a
+#define FTS_PALM_DATA                       0x01
+#define FTS_PALM_ON                         0x05
+#define FTS_PALM_OFF                        0x00
 
 #define FTS_SYSFS_ECHO_ON(buf)      (buf[0] == '1')
 #define FTS_SYSFS_ECHO_OFF(buf)     (buf[0] == '0')
@@ -103,12 +116,11 @@
 	if (pbuf) {\
 		kfree(pbuf);\
 		pbuf = NULL;\
-	}\
-} while(0)
+	} \
+} while (0)
 
 /*****************************************************************************
-*  Alternative mode (When something goes wrong,
-* the modules may be able to solve the problem.)
+*  Alternative mode (When something goes wrong, the modules may be able to solve the problem.)
 *****************************************************************************/
 /*
  * point report check
@@ -142,15 +154,15 @@ struct ts_ic_info {
 *****************************************************************************/
 #if FTS_DEBUG_EN
 #define FTS_DEBUG(fmt, args...) do { \
-	printk("[FTS_TS]%s:"fmt"\n", __func__, ##args); \
+	pr_info("[FTS_TS]%s:"fmt"\n", __func__, ##args); \
 } while (0)
 
 #define FTS_FUNC_ENTER() do { \
-	printk("[FTS_TS]%s: Enter\n", __func__); \
+	pr_info("[FTS_TS]%s: Enter\n", __func__); \
 } while (0)
 
 #define FTS_FUNC_EXIT() do { \
-	printk("[FTS_TS]%s: Exit(%d)\n", __func__, __LINE__); \
+	pr_info("[FTS_TS]%s: Exit(%d)\n", __func__, __LINE__); \
 } while (0)
 #else /* #if FTS_DEBUG_EN*/
 #define FTS_DEBUG(fmt, args...)
@@ -159,10 +171,10 @@ struct ts_ic_info {
 #endif
 
 #define FTS_INFO(fmt, args...) do { \
-	printk(KERN_INFO "[FTS_TS/I]%s:"fmt"\n", __func__, ##args); \
+	pr_info(KERN_INFO "[FTS_TS/I]%s:"fmt"\n", __func__, ##args); \
 } while (0)
 
 #define FTS_ERROR(fmt, args...) do { \
-	printk(KERN_ERR "[FTS_TS/E]%s:"fmt"\n", __func__, ##args); \
+	pr_info(KERN_ERR "[FTS_TS/E]%s:"fmt"\n", __func__, ##args); \
 } while (0)
 #endif /* __LINUX_FOCALTECH_COMMON_H__ */

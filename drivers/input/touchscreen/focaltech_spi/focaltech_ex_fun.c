@@ -2,7 +2,7 @@
  *
  * FocalTech TouchScreen driver.
  *
- * Copyright (c) 2012-2019, Focaltech Ltd. All rights reserved.
+ * Copyright (c) 2012-2020, Focaltech Ltd. All rights reserved.
  *
  * This software is licensed under the terms of the GNU General Public
  * License version 2, as published by the Free Software Foundation, and
@@ -32,7 +32,6 @@
 /*****************************************************************************
 * 1.Included header files
 *****************************************************************************/
-#include <linux/uaccess.h>
 #include "focaltech_core.h"
 
 /*****************************************************************************
@@ -66,12 +65,12 @@ enum {
 * Static variables
 *****************************************************************************/
 static struct rwreg_operation_t {
-	int type;        /*  0: read, 1: write */
-	int reg;         /*  register */
-	int len;         /*  read/write length */
-	int val;         /*  length = 1; read: return value, write: op return */
-	int res;         /*  0: success, otherwise: fail */
-	char *opbuf;     /*  length >= 1, read return value, write: op return */
+	int type;           /*  0: read, 1: write */
+	int reg;            /*  register */
+	int len;            /*  read/write length */
+	int val;            /*  length = 1; read: return value, write: op return */
+	int res;            /*  0: success, otherwise: fail */
+	char *opbuf;        /*  length >= 1, read return value, write: op return */
 } rw_op;
 
 /*****************************************************************************
@@ -94,219 +93,8 @@ static ssize_t fts_debug_write(
 	struct fts_ts_data *ts_data = fts_data;
 	struct ftxxxx_proc *proc = &ts_data->proc;
 
-	if ((buflen <= 1) || (buflen > PAGE_SIZE)) {
-		FTS_ERROR("apk proc wirte count(%d>%d) fail", buflen, (int)PAGE_SIZE);
-		return -EINVAL;
-	}
-
-	if (buflen > PROC_BUF_SIZE) {
-		writebuf = (u8 *)kzalloc(buflen * sizeof(u8), GFP_KERNEL);
-		if (NULL == writebuf) {
-			FTS_ERROR("apk proc wirte buf zalloc fail");
-			return -ENOMEM;
-		}
-	} else {
-		writebuf = tmpbuf;
-	}
-
-	if (copy_from_user(writebuf, buff, buflen)) {
-		FTS_ERROR("[APK]: copy from user error!!");
-		ret = -EFAULT;
-		goto proc_write_err;
-	}
-
-	proc->opmode = writebuf[0];
-	switch (proc->opmode) {
-	case PROC_SET_TEST_FLAG:
-		FTS_DEBUG("[APK]: PROC_SET_TEST_FLAG = %x", writebuf[1]);
-		if (writebuf[1] == 0) {
-#if FTS_ESDCHECK_EN
-			fts_esdcheck_switch(ENABLE);
-#endif
-		} else {
-#if FTS_ESDCHECK_EN
-			fts_esdcheck_switch(DISABLE);
-#endif
-		}
-		break;
-
-	case PROC_READ_REGISTER:
-		proc->cmd[0] = writebuf[1];
-		break;
-
-	case PROC_WRITE_REGISTER:
-		ret = fts_write_reg(writebuf[1], writebuf[2]);
-		if (ret < 0) {
-			FTS_ERROR("PROC_WRITE_REGISTER write error");
-			goto proc_write_err;
-		}
-		break;
-
-	case PROC_READ_DATA:
-		writelen = buflen - 1;
-		if (writelen >= FTX_MAX_COMMMAND_LENGTH) {
-			FTS_ERROR("cmd(PROC_READ_DATA) len(%d) fail", writelen);
-			goto proc_write_err;
-		}
-		memcpy(proc->cmd, writebuf + 1, writelen);
-		proc->cmd_len = writelen;
-		ret = fts_write(writebuf + 1, writelen);
-		if (ret < 0) {
-			FTS_ERROR("PROC_READ_DATA write error");
-			goto proc_write_err;
-		}
-		break;
-
-	case PROC_WRITE_DATA:
-		writelen = buflen - 1;
-		ret = fts_write(writebuf + 1, writelen);
-		if (ret < 0) {
-			FTS_ERROR("PROC_WRITE_DATA write error");
-			goto proc_write_err;
-		}
-		break;
-
-	case PROC_SET_SLAVE_ADDR:
-		break;
-
-	case PROC_HW_RESET:
-		snprintf(tmp, PROC_BUF_SIZE, "%s", writebuf + 1);
-		tmp[buflen - 1] = '\0';
-		if (strncmp(tmp, "focal_driver", 12) == 0) {
-			FTS_INFO("APK execute HW Reset");
-			fts_reset_proc(0);
-		}
-		break;
-
-	case PROC_SET_BOOT_MODE:
-		FTS_DEBUG("[APK]: PROC_SET_BOOT_MODE = %x", writebuf[1]);
-		if (0 == writebuf[1]) {
-			ts_data->fw_is_running = true;
-		} else {
-			ts_data->fw_is_running = false;
-		}
-		break;
-
-	case PROC_ENTER_TEST_ENVIRONMENT:
-		FTS_DEBUG("[APK]: PROC_ENTER_TEST_ENVIRONMENT = %x", writebuf[1]);
-		if (0 == writebuf[1]) {
-			fts_enter_test_environment(0);
-		} else {
-			fts_enter_test_environment(1);
-		}
-		break;
-
-	default:
-		break;
-	}
-
-	ret = buflen;
-proc_write_err:
-	if ((buflen > PROC_BUF_SIZE) && writebuf) {
-		kfree(writebuf);
-		writebuf = NULL;
-	}
-	return ret;
-}
-
-static ssize_t fts_debug_read(
-	struct file *filp, char __user *buff, size_t count, loff_t *ppos)
-{
-	int ret = 0;
-	int num_read_chars = 0;
-	int buflen = count;
-	u8 *readbuf = NULL;
-	u8 tmpbuf[PROC_BUF_SIZE] = { 0 };
-	struct fts_ts_data *ts_data = fts_data;
-	struct ftxxxx_proc *proc = &ts_data->proc;
-
-	if ((buflen <= 0) || (buflen > PAGE_SIZE)) {
-		FTS_ERROR("apk proc read count(%d>%d) fail", buflen, (int)PAGE_SIZE);
-		return -EINVAL;
-	}
-
-	if (buflen > PROC_BUF_SIZE) {
-		readbuf = (u8 *)kzalloc(buflen * sizeof(u8), GFP_KERNEL);
-		if (NULL == readbuf) {
-			FTS_ERROR("apk proc wirte buf zalloc fail");
-			return -ENOMEM;
-		}
-	} else {
-		readbuf = tmpbuf;
-	}
-
-#if FTS_ESDCHECK_EN
-	fts_esdcheck_proc_busy(1);
-#endif
-
-	switch (proc->opmode) {
-	case PROC_READ_REGISTER:
-		num_read_chars = 1;
-		ret = fts_read_reg(proc->cmd[0], &readbuf[0]);
-		if (ret < 0) {
-			FTS_ERROR("PROC_READ_REGISTER read error");
-			goto proc_read_err;
-		}
-		break;
-
-	case PROC_WRITE_REGISTER:
-		break;
-
-	case PROC_READ_DATA:
-		num_read_chars = buflen;
-		ret = fts_read(NULL, 0, readbuf, num_read_chars);
-		if (ret < 0) {
-			FTS_ERROR("PROC_READ_DATA read error");
-			goto proc_read_err;
-		}
-		break;
-
-	case PROC_WRITE_DATA:
-		break;
-
-	default:
-		break;
-	}
-
-#if FTS_ESDCHECK_EN
-	fts_esdcheck_proc_busy(0);
-#endif
-
-	if (copy_to_user(buff, readbuf, num_read_chars)) {
-		FTS_ERROR("copy to user error");
-		ret = -EFAULT;
-		goto proc_read_err;
-	}
-
-	ret = num_read_chars;
-proc_read_err:
-	if ((buflen > PROC_BUF_SIZE) && readbuf) {
-		kfree(readbuf);
-		readbuf = NULL;
-	}
-	return ret;
-}
-
-static const struct file_operations fts_proc_fops = {
-	.owner = THIS_MODULE,
-	.read  = fts_debug_read,
-	.write = fts_debug_write,
-};
-#else
-static int fts_debug_write(struct file *filp,
-	const char __user *buff, unsigned long len, void *data)
-{
-	u8 *writebuf = NULL;
-	u8 tmpbuf[PROC_BUF_SIZE] = { 0 };
-	int buflen = count;
-	int writelen = 0;
-	int ret = 0;
-	char tmp[PROC_BUF_SIZE];
-	struct fts_ts_data *ts_data = fts_data;
-	struct ftxxxx_proc *proc = &ts_data->proc;
-
-	if ((buflen <= 1) || (buflen > PAGE_SIZE)) {
-		FTS_ERROR("apk proc wirte count(%d>%d) fail", buflen, (int)PAGE_SIZE);
+	if (buflen <= 1) {
+		FTS_ERROR("apk proc wirte count(%d) fail", buflen);
 		return -EINVAL;
 	}
 
@@ -361,11 +149,6 @@ static int fts_debug_write(struct file *filp,
 		}
 		memcpy(proc->cmd, writebuf + 1, writelen);
 		proc->cmd_len = writelen;
-		ret = fts_write(writebuf + 1, writelen);
-		if (ret < 0) {
-			FTS_ERROR("PROC_READ_DATA write error");
-			goto proc_write_err;
-		}
 		break;
 
 	case PROC_WRITE_DATA:
@@ -397,7 +180,6 @@ static int fts_debug_write(struct file *filp,
 			ts_data->fw_is_running = false;
 		}
 		break;
-
 	case PROC_ENTER_TEST_ENVIRONMENT:
 		FTS_DEBUG("[APK]: PROC_ENTER_TEST_ENVIRONMENT = %x", writebuf[1]);
 		if (0 == writebuf[1]) {
@@ -420,8 +202,8 @@ proc_write_err:
 	return ret;
 }
 
-static int fts_debug_read(
-	char *page, char **start, off_t off, int count, int *eof, void *data )
+static ssize_t fts_debug_read(
+	struct file *filp, char __user *buff, size_t count, loff_t *ppos)
 {
 	int ret = 0;
 	int num_read_chars = 0;
@@ -431,8 +213,8 @@ static int fts_debug_read(
 	struct fts_ts_data *ts_data = fts_data;
 	struct ftxxxx_proc *proc = &ts_data->proc;
 
-	if ((buflen <= 0) || (buflen > PAGE_SIZE)) {
-		FTS_ERROR("apk proc read count(%d>%d) fail", buflen, (int)PAGE_SIZE);
+	if (buflen <= 0) {
+		FTS_ERROR("apk proc read count(%d) fail", buflen);
 		return -EINVAL;
 	}
 
@@ -459,13 +241,12 @@ static int fts_debug_read(
 			goto proc_read_err;
 		}
 		break;
-
 	case PROC_WRITE_REGISTER:
 		break;
 
 	case PROC_READ_DATA:
 		num_read_chars = buflen;
-		ret = fts_read(NULL, 0, readbuf, num_read_chars);
+		ret = fts_read(proc->cmd, proc->cmd_len, readbuf, num_read_chars);
 		if (ret < 0) {
 			FTS_ERROR("PROC_READ_DATA read error");
 			goto proc_read_err;
@@ -483,14 +264,216 @@ static int fts_debug_read(
 	fts_esdcheck_proc_busy(0);
 #endif
 
+	ret = num_read_chars;
+proc_read_err:
 	if (copy_to_user(buff, readbuf, num_read_chars)) {
 		FTS_ERROR("copy to user error");
 		ret = -EFAULT;
-		goto proc_read_err;
 	}
+
+	if ((buflen > PROC_BUF_SIZE) && readbuf) {
+		kfree(readbuf);
+		readbuf = NULL;
+	}
+	return ret;
+}
+
+static const struct file_operations fts_proc_fops = {
+	.owner  = THIS_MODULE,
+	.read   = fts_debug_read,
+	.write  = fts_debug_write,
+};
+#else
+static int fts_debug_write(
+	struct file *filp, const char __user *buff, unsigned long len, void *data)
+{
+	u8 *writebuf = NULL;
+	u8 tmpbuf[PROC_BUF_SIZE] = { 0 };
+	int buflen = count;
+	int writelen = 0;
+	int ret = 0;
+	char tmp[PROC_BUF_SIZE];
+	struct fts_ts_data *ts_data = fts_data;
+	struct ftxxxx_proc *proc = &ts_data->proc;
+
+	if (buflen <= 1) {
+		FTS_ERROR("apk proc wirte count(%d) fail", buflen);
+		return -EINVAL;
+	}
+
+	if (buflen > PROC_BUF_SIZE) {
+		writebuf = (u8 *)kzalloc(buflen * sizeof(u8), GFP_KERNEL);
+		if (NULL == writebuf) {
+			FTS_ERROR("apk proc wirte buf zalloc fail");
+			return -ENOMEM;
+		}
+	} else {
+		writebuf = tmpbuf;
+	}
+
+	if (copy_from_user(writebuf, buff, buflen)) {
+		FTS_ERROR("[APK]: copy from user error!!");
+		ret = -EFAULT;
+		goto proc_write_err;
+	}
+
+	proc->opmode = writebuf[0];
+	switch (proc->opmode) {
+	case PROC_SET_TEST_FLAG:
+		FTS_DEBUG("[APK]: PROC_SET_TEST_FLAG = %x", writebuf[1]);
+		if (writebuf[1] == 0) {
+#if FTS_ESDCHECK_EN
+			fts_esdcheck_switch(ENABLE);
+#endif
+		} else {
+#if FTS_ESDCHECK_EN
+			fts_esdcheck_switch(DISABLE);
+#endif
+		}
+		break;
+
+	case PROC_READ_REGISTER:
+		proc->cmd[0] = writebuf[1];
+		break;
+
+	case PROC_WRITE_REGISTER:
+		ret = fts_write_reg(writebuf[1], writebuf[2]);
+		if (ret < 0) {
+			FTS_ERROR("PROC_WRITE_REGISTER write error");
+			goto proc_write_err;
+		}
+		break;
+
+	case PROC_READ_DATA:
+		writelen = buflen - 1;
+		if (writelen >= FTX_MAX_COMMMAND_LENGTH) {
+			FTS_ERROR("cmd(PROC_READ_DATA) length(%d) fail", writelen);
+			goto proc_write_err;
+		}
+		memcpy(proc->cmd, writebuf + 1, writelen);
+		proc->cmd_len = writelen;
+		break;
+
+	case PROC_WRITE_DATA:
+		writelen = buflen - 1;
+		ret = fts_write(writebuf + 1, writelen);
+		if (ret < 0) {
+			FTS_ERROR("PROC_WRITE_DATA write error");
+			goto proc_write_err;
+		}
+		break;
+
+	case PROC_SET_SLAVE_ADDR:
+		break;
+
+	case PROC_HW_RESET:
+		snprintf(tmp, PROC_BUF_SIZE, "%s", writebuf + 1);
+		tmp[buflen - 1] = '\0';
+		if (strncmp(tmp, "focal_driver", 12) == 0) {
+			FTS_INFO("APK execute HW Reset");
+			fts_reset_proc(0);
+		}
+		break;
+
+	case PROC_SET_BOOT_MODE:
+		FTS_DEBUG("[APK]: PROC_SET_BOOT_MODE = %x", writebuf[1]);
+		if (0 == writebuf[1]) {
+			ts_data->fw_is_running = true;
+		} else {
+			ts_data->fw_is_running = false;
+		}
+		break;
+	case PROC_ENTER_TEST_ENVIRONMENT:
+		FTS_DEBUG("[APK]: PROC_ENTER_TEST_ENVIRONMENT = %x", writebuf[1]);
+		if (0 == writebuf[1]) {
+			fts_enter_test_environment(0);
+		} else {
+			fts_enter_test_environment(1);
+		}
+		break;
+
+	default:
+		break;
+	}
+
+	ret = buflen;
+proc_write_err:
+	if ((buflen > PROC_BUF_SIZE) && writebuf) {
+		kfree(writebuf);
+		writebuf = NULL;
+	}
+	return ret;
+}
+
+static int fts_debug_read(
+	char *page, char **start, off_t off, int count, int *eof, void *data)
+{
+	int ret = 0;
+	int num_read_chars = 0;
+	int buflen = count;
+	u8 *readbuf = NULL;
+	u8 tmpbuf[PROC_BUF_SIZE] = { 0 };
+	struct fts_ts_data *ts_data = fts_data;
+	struct ftxxxx_proc *proc = &ts_data->proc;
+
+	if (buflen <= 0) {
+		FTS_ERROR("apk proc read count(%d) fail", buflen);
+		return -EINVAL;
+	}
+
+	if (buflen > PROC_BUF_SIZE) {
+		readbuf = (u8 *)kzalloc(buflen * sizeof(u8), GFP_KERNEL);
+		if (NULL == readbuf) {
+			FTS_ERROR("apk proc wirte buf zalloc fail");
+			return -ENOMEM;
+		}
+	} else {
+		readbuf = tmpbuf;
+	}
+
+#if FTS_ESDCHECK_EN
+	fts_esdcheck_proc_busy(1);
+#endif
+
+	switch (proc->opmode) {
+	case PROC_READ_REGISTER:
+		num_read_chars = 1;
+		ret = fts_read_reg(proc->cmd[0], &readbuf[0]);
+		if (ret < 0) {
+			FTS_ERROR("PROC_READ_REGISTER read error");
+			goto proc_read_err;
+		}
+		break;
+	case PROC_WRITE_REGISTER:
+		break;
+
+	case PROC_READ_DATA:
+		num_read_chars = buflen;
+		ret = fts_read(proc->cmd, proc->cmd_len, readbuf, num_read_chars);
+		if (ret < 0) {
+			FTS_ERROR("PROC_READ_DATA read error");
+			goto proc_read_err;
+		}
+		break;
+
+	case PROC_WRITE_DATA:
+		break;
+
+	default:
+		break;
+	}
+
+#if FTS_ESDCHECK_EN
+	fts_esdcheck_proc_busy(0);
+#endif
 
 	ret = num_read_chars;
 proc_read_err:
+	if (copy_to_user(buff, readbuf, num_read_chars)) {
+		FTS_ERROR("copy to user error");
+		ret = -EFAULT;
+	}
+
 	if ((buflen > PROC_BUF_SIZE) && readbuf) {
 		kfree(readbuf);
 		readbuf = NULL;
@@ -499,42 +482,117 @@ proc_read_err:
 }
 #endif
 
-int fts_create_apk_debug_channel(struct fts_ts_data *ts_data)
+static ssize_t fts_fw_version_read(struct file *filp,
+			char __user *buf, size_t count, loff_t *pos)
+{
+	int ret = 0, cnt = 0;
+	char tmp[PROC_BUF_SIZE];
+	struct fts_ts_data *ts_data = fts_data;
+	u8 fwver = 0;
+
+	if (*pos != 0)
+		return 0;
+
+	mutex_lock(&ts_data->input_dev->mutex);
+
+#if FTS_ESDCHECK_EN
+	fts_esdcheck_proc_busy(1);
+#endif
+	ret = fts_read_reg(FTS_REG_FW_VER, &fwver);
+#if FTS_ESDCHECK_EN
+	fts_esdcheck_proc_busy(0);
+#endif
+	if ((ret < 0) || (fwver == 0xFF) || (fwver == 0x00))
+		cnt = snprintf(tmp, PROC_BUF_SIZE, "get tp fw version fail!\n");
+	else
+		cnt = snprintf(tmp, PROC_BUF_SIZE, "%02x\n", fwver);
+	mutex_unlock(&ts_data->input_dev->mutex);
+
+	ret = copy_to_user(buf, tmp, cnt);
+	*pos += cnt;
+	if (ret != 0)
+		return 0;
+	else
+		return cnt;
+}
+
+static const struct file_operations tp_fw_version_fops = {
+	.read = fts_fw_version_read,
+};
+
+
+static ssize_t fts_lockdown_info_read(struct file *filp,
+			char __user *buf, size_t count, loff_t *pos)
+{
+	int cnt = 0, ret = 0;
+	char tmp[PROC_BUF_SIZE];
+	struct fts_ts_data *ts_data = fts_data;
+
+	if (*pos != 0)
+		return 0;
+
+	cnt = snprintf(tmp, PROC_BUF_SIZE,
+			"0x%02x,0x%02x,0x%02x,0x%02x,0x%02x,0x%02x,0x%02x,0x%02x\n",
+			ts_data->lockdown_info[0], ts_data->lockdown_info[1],
+			ts_data->lockdown_info[2], ts_data->lockdown_info[3],
+			ts_data->lockdown_info[4], ts_data->lockdown_info[5],
+			ts_data->lockdown_info[6], ts_data->lockdown_info[7]);
+	ret = copy_to_user(buf, tmp, cnt);
+	*pos += cnt;
+	if (ret != 0)
+		return 0;
+	else
+		return cnt;
+}
+
+static const struct file_operations tp_lockdown_info_fops = {
+	.read = fts_lockdown_info_read,
+};
+
+
+int fts_create_proc(struct fts_ts_data *ts_data)
 {
 	struct ftxxxx_proc *proc = &ts_data->proc;
 
-#if (LINUX_VERSION_CODE >= KERNEL_VERSION(3, 10, 0))
 	proc->proc_entry = proc_create(PROC_NAME, 0777, NULL, &fts_proc_fops);
-	if (NULL == proc->proc_entry) {
+	if (proc->proc_entry == NULL) {
 		FTS_ERROR("create proc entry fail");
 		return -ENOMEM;
 	}
-#else
-	proc->proc_entry = create_proc_entry(PROC_NAME, 0777, NULL);
-	if (NULL == proc->proc_entry) {
-		FTS_ERROR("create proc entry fail");
+
+	proc->tp_lockdown_info_proc = proc_create("tp_lockdown_info",
+						0444, NULL, &tp_lockdown_info_fops);
+	if (proc->tp_lockdown_info_proc == NULL) {
+		FTS_ERROR("tp_lockdown_info proc create failed");
 		return -ENOMEM;
 	}
-	proc->proc_entry->write_proc = fts_debug_write;
-	proc->proc_entry->read_proc = fts_debug_read;
-#endif
+
+	proc->tp_fw_version_proc = proc_create("tp_fw_version",
+						0444, NULL, &tp_fw_version_fops);
+	if (proc->tp_fw_version_proc == NULL) {
+		FTS_ERROR("tp_fw_version proc create failed");
+		return -ENOMEM;
+	}
 
 	FTS_INFO("Create proc entry success!");
 	return 0;
 }
 
-void fts_release_apk_debug_channel(struct fts_ts_data *ts_data)
+void fts_remove_proc(struct fts_ts_data *ts_data)
 {
 	struct ftxxxx_proc *proc = &ts_data->proc;
 
-	if (proc->proc_entry) {
-#if (LINUX_VERSION_CODE >= KERNEL_VERSION(3, 10, 0))
+	if (proc->proc_entry)
 		proc_remove(proc->proc_entry);
-#else
-		remove_proc_entry(PROC_NAME, NULL);
-#endif
-	}
+	if (proc->tp_fw_version_proc)
+		proc_remove(proc->tp_fw_version_proc);
+	if (proc->tp_lockdown_info_proc)
+		proc_remove(proc->tp_lockdown_info_proc);
+	proc->proc_entry = NULL;
+	proc->tp_fw_version_proc = NULL;
+	proc->tp_lockdown_info_proc = NULL;
 }
+
 
 /************************************************************************
  * sysfs interface
@@ -636,6 +694,7 @@ static ssize_t fts_bootmode_show(
 static ssize_t fts_tpfwver_show(
 	struct device *dev, struct device_attribute *attr, char *buf)
 {
+	int ret = 0;
 	struct fts_ts_data *ts_data = fts_data;
 	struct input_dev *input_dev = ts_data->input_dev;
 	ssize_t num_read_chars = 0;
@@ -646,11 +705,11 @@ static ssize_t fts_tpfwver_show(
 #if FTS_ESDCHECK_EN
 	fts_esdcheck_proc_busy(1);
 #endif
-	fts_read_reg(FTS_REG_FW_VER, &fwver);
+	ret = fts_read_reg(FTS_REG_FW_VER, &fwver);
 #if FTS_ESDCHECK_EN
 	fts_esdcheck_proc_busy(0);
 #endif
-	if ((fwver == 0xFF) || (fwver == 0x00))
+	if ((ret < 0) || (fwver == 0xFF) || (fwver == 0x00))
 		num_read_chars = snprintf(buf, PAGE_SIZE, "get tp fw version fail!\n");
 	else
 		num_read_chars = snprintf(buf, PAGE_SIZE, "%02x\n", fwver);
@@ -707,6 +766,7 @@ static ssize_t fts_tprwreg_show(
 				}
 			}
 		} else {
+			;
 			count = snprintf(buf, PAGE_SIZE, "Write Reg: [%02X]-[%02X]\n", rw_op.reg, rw_op.reg + rw_op.len - 1);
 			count += snprintf(buf + count, PAGE_SIZE, "Write Data: ");
 			if (rw_op.opbuf) {
@@ -722,10 +782,9 @@ static ssize_t fts_tprwreg_show(
 			}
 		}
 		/*if (rw_op.opbuf) {
-		 *  kfree(rw_op.opbuf);
-		 *  rw_op.opbuf = NULL;
-		 *}
-		 */
+			kfree(rw_op.opbuf);
+			rw_op.opbuf = NULL;
+		}*/
 	}
 	mutex_unlock(&input_dev->mutex);
 
@@ -855,48 +914,47 @@ static ssize_t fts_tprwreg_store(
 #endif
 	if (rw_op.len < 0) {
 		FTS_ERROR("cmd buffer error!");
-		goto exit;
-	}
-
-	if (RWREG_OP_READ == rw_op.type) {
-		if (rw_op.len == 1) {
-			u8 reg, val;
-			reg = rw_op.reg & 0xFF;
-			rw_op.res = fts_read_reg(reg, &val);
-			rw_op.val = val;
-		} else {
-			char reg;
-			reg = rw_op.reg & 0xFF;
-
-			rw_op.res = fts_read(&reg, 1, rw_op.opbuf, rw_op.len);
-		}
-
-		if (rw_op.res < 0) {
-			FTS_ERROR("Could not read 0x%02x", rw_op.reg);
-		} else {
-			FTS_INFO("read 0x%02x, %d bytes successful", rw_op.reg, rw_op.len);
-			rw_op.res = 0;
-		}
 
 	} else {
-		if (rw_op.len == 1) {
-			u8 reg, val;
-			reg = rw_op.reg & 0xFF;
-			val = rw_op.val & 0xFF;
-			rw_op.res = fts_write_reg(reg, val);
-		} else {
-			rw_op.res = fts_write(rw_op.opbuf, rw_op.len);
-		}
-		if (rw_op.res < 0) {
-			FTS_ERROR("Could not write 0x%02x", rw_op.reg);
+		if (RWREG_OP_READ == rw_op.type) {
+			if (rw_op.len == 1) {
+				u8 reg, val;
+				reg = rw_op.reg & 0xFF;
+				rw_op.res = fts_read_reg(reg, &val);
+				rw_op.val = val;
+			} else {
+				char reg;
+				reg = rw_op.reg & 0xFF;
+
+				rw_op.res = fts_read(&reg, 1, rw_op.opbuf, rw_op.len);
+			}
+
+			if (rw_op.res < 0) {
+				FTS_ERROR("Could not read 0x%02x", rw_op.reg);
+			} else {
+				FTS_INFO("read 0x%02x, %d bytes successful", rw_op.reg, rw_op.len);
+				rw_op.res = 0;
+			}
 
 		} else {
-			FTS_INFO("Write 0x%02x, %d bytes successful", rw_op.val, rw_op.len);
-			rw_op.res = 0;
+			if (rw_op.len == 1) {
+				u8 reg, val;
+				reg = rw_op.reg & 0xFF;
+				val = rw_op.val & 0xFF;
+				rw_op.res = fts_write_reg(reg, val);
+			} else {
+				rw_op.res = fts_write(rw_op.opbuf, rw_op.len);
+			}
+			if (rw_op.res < 0) {
+				FTS_ERROR("Could not write 0x%02x", rw_op.reg);
+
+			} else {
+				FTS_INFO("Write 0x%02x, %d bytes successful", rw_op.val, rw_op.len);
+				rw_op.res = 0;
+			}
 		}
 	}
 
-exit:
 #if FTS_ESDCHECK_EN
 	fts_esdcheck_proc_busy(0);
 #endif
@@ -923,7 +981,6 @@ static ssize_t fts_fwupgradebin_store(
 		FTS_ERROR("fw bin name's length(%d) fail", (int)count);
 		return -EINVAL;
 	}
-
 	memset(fwname, 0, sizeof(fwname));
 	snprintf(fwname, FILE_NAME_LENGTH, "%s", buf);
 	fwname[count - 1] = '\0';
@@ -954,7 +1011,6 @@ static ssize_t fts_fwforceupg_store(
 		FTS_ERROR("fw bin name's length(%d) fail", (int)count);
 		return -EINVAL;
 	}
-
 	memset(fwname, 0, sizeof(fwname));
 	snprintf(fwname, FILE_NAME_LENGTH, "%s", buf);
 	fwname[count - 1] = '\0';
@@ -977,25 +1033,39 @@ static ssize_t fts_driverinfo_show(
 	struct input_dev *input_dev = ts_data->input_dev;
 
 	mutex_lock(&input_dev->mutex);
-	count += snprintf(buf + count, PAGE_SIZE, "Driver Ver:%s\n", FTS_DRIVER_VERSION);
+	count += snprintf(buf + count, PAGE_SIZE, "Driver Ver:%s\n",
+					  FTS_DRIVER_VERSION);
 
 	count += snprintf(buf + count, PAGE_SIZE, "Resolution:(%d,%d)~(%d,%d)\n",
-			pdata->x_min, pdata->y_min, pdata->x_max, pdata->y_max);
+					  pdata->x_min, pdata->y_min, pdata->x_max, pdata->y_max);
 
-	count += snprintf(buf + count, PAGE_SIZE, "Max Touchs:%d\n", pdata->max_touch_number);
+	count += snprintf(buf + count, PAGE_SIZE, "Max Touchs:%d\n",
+					  pdata->max_touch_number);
 
-	count += snprintf(buf + count, PAGE_SIZE, "reset gpio:%d,int gpio:%d,irq:%d\n",
-			pdata->reset_gpio, pdata->irq_gpio, ts_data->irq);
+	count += snprintf(buf + count, PAGE_SIZE,
+					  "reset gpio:%d,int gpio:%d,irq:%d\n",
+					  pdata->reset_gpio, pdata->irq_gpio, ts_data->irq);
 
 	count += snprintf(buf + count, PAGE_SIZE, "IC ID:0x%02x%02x\n",
-			ts_data->ic_info.ids.chip_idh, ts_data->ic_info.ids.chip_idl);
+					  ts_data->ic_info.ids.chip_idh,
+					  ts_data->ic_info.ids.chip_idl);
+
+	if (ts_data->bus_type == BUS_TYPE_I2C) {
+		count += snprintf(buf + count, PAGE_SIZE, "BUS:%s,addr:0x%x\n",
+						  "I2C", ts_data->client->addr);
+	} else {
+		count += snprintf(buf + count, PAGE_SIZE,
+						  "BUS:%s,mode:%d,max_freq:%d\n", "SPI",
+						  ts_data->spi->mode, ts_data->spi->max_speed_hz);
+	}
 	mutex_unlock(&input_dev->mutex);
 
 	return count;
 }
 
-static ssize_t fts_driverinfo_store(struct device *dev,
-		struct device_attribute *attr, const char *buf, size_t count)
+static ssize_t fts_driverinfo_store(
+	struct device *dev,
+	struct device_attribute *attr, const char *buf, size_t count)
 {
 	return -EPERM;
 }
@@ -1029,9 +1099,6 @@ static ssize_t fts_dumpreg_show(
 
 	fts_read_reg(FTS_REG_VENDOR_ID, &val);
 	count += snprintf(buf + count, PAGE_SIZE, "Vendor ID:0x%02x\n", val);
-
-	fts_read_reg(FTS_REG_LCD_BUSY_NUM, &val);
-	count += snprintf(buf + count, PAGE_SIZE, "LCD Busy Number:0x%02x\n", val);
 
 	fts_read_reg(FTS_REG_GESTURE_EN, &val);
 	count += snprintf(buf + count, PAGE_SIZE, "Gesture Mode:0x%02x\n", val);
@@ -1071,8 +1138,7 @@ static ssize_t fts_tpbuf_show(
 	mutex_lock(&input_dev->mutex);
 	count += snprintf(buf + count, PAGE_SIZE, "touch point buffer:\n");
 	for (i = 0; i < fts_data->pnt_buf_size; i++) {
-		count += snprintf(buf + count, PAGE_SIZE, "%02x ",
-			fts_data->point_buf[i]);
+		count += snprintf(buf + count, PAGE_SIZE, "%02x ", fts_data->point_buf[i]);
 	}
 	count += snprintf(buf + count, PAGE_SIZE, "\n");
 	mutex_unlock(&input_dev->mutex);
@@ -1096,7 +1162,7 @@ static ssize_t fts_log_level_show(
 
 	mutex_lock(&input_dev->mutex);
 	count += snprintf(buf + count, PAGE_SIZE, "log level:%d\n",
-			fts_data->log_level);
+					  fts_data->log_level);
 	mutex_unlock(&input_dev->mutex);
 
 	return count;
@@ -1119,6 +1185,24 @@ static ssize_t fts_log_level_store(
 
 	return count;
 }
+
+static ssize_t fts_lockdown_info_show(struct device *dev,
+		struct device_attribute *attr, char *buf)
+{
+	int count = 0;
+	struct fts_ts_data *ts_data = fts_data;
+
+	FTS_FUNC_ENTER();
+	count = snprintf(buf, PAGE_SIZE,
+			"0x%02x,0x%02x,0x%02x,0x%02x,0x%02x,0x%02x,0x%02x,0x%02x\n",
+			ts_data->lockdown_info[0], ts_data->lockdown_info[1],
+			ts_data->lockdown_info[2], ts_data->lockdown_info[3],
+			ts_data->lockdown_info[4], ts_data->lockdown_info[5],
+			ts_data->lockdown_info[6], ts_data->lockdown_info[7]);
+	FTS_FUNC_EXIT();
+	return count;
+}
+
 
 /* get the fw version  example:cat fw_version */
 static DEVICE_ATTR(fts_fw_version, S_IRUGO | S_IWUSR, fts_tpfwver_show, fts_tpfwver_store);
@@ -1147,6 +1231,7 @@ static DEVICE_ATTR(fts_irq, S_IRUGO | S_IWUSR, fts_irq_show, fts_irq_store);
 static DEVICE_ATTR(fts_boot_mode, S_IRUGO | S_IWUSR, fts_bootmode_show, fts_bootmode_store);
 static DEVICE_ATTR(fts_touch_point, S_IRUGO | S_IWUSR, fts_tpbuf_show, fts_tpbuf_store);
 static DEVICE_ATTR(fts_log_level, S_IRUGO | S_IWUSR, fts_log_level_show, fts_log_level_store);
+static DEVICE_ATTR(fts_lockdown_info, S_IRUGO, fts_lockdown_info_show, NULL);
 
 /* add your attr in here*/
 static struct attribute *fts_attributes[] = {
@@ -1161,6 +1246,7 @@ static struct attribute *fts_attributes[] = {
 	&dev_attr_fts_boot_mode.attr,
 	&dev_attr_fts_touch_point.attr,
 	&dev_attr_fts_log_level.attr,
+	&dev_attr_fts_lockdown_info.attr,
 	NULL
 };
 

@@ -2,7 +2,7 @@
  *
  * FocalTech TouchScreen driver.
  *
- * Copyright (c) 2012-2019, Focaltech Ltd. All rights reserved.
+ * Copyright (c) 2012-2020, Focaltech Ltd. All rights reserved.
  *
  * This software is licensed under the terms of the GNU General Public
  * License version 2, as published by the Free Software Foundation, and
@@ -46,7 +46,7 @@
 #include <linux/vmalloc.h>
 #include <linux/gpio.h>
 #include <linux/regulator/consumer.h>
-#include <asm/uaccess.h>
+#include <linux/uaccess.h>
 #include <linux/firmware.h>
 #include <linux/debugfs.h>
 #include <linux/mutex.h>
@@ -62,6 +62,12 @@
 #include <linux/kthread.h>
 #include <linux/dma-mapping.h>
 #include "focaltech_common.h"
+#include <linux/power_supply.h>
+
+
+#ifdef CONFIG_TOUCHSCREEN_XIAOMI_TOUCHFEATURE
+#include "../xiaomi/xiaomi_touch.h"
+#endif
 
 /*****************************************************************************
 * Private constant and macro definitions using #define
@@ -101,12 +107,34 @@
 #define FTX_MAX_COMPATIBLE_TYPE             4
 #define FTX_MAX_COMMMAND_LENGTH             16
 
+#define FTS_LOCKDOWN_INFO_ADDR                      0x1F000
+#define FTS_LOCKDOWN_INFO_SIZE                      8
+
+#define FTS_TEST_OPEN_MIN                       	3000
+
+#define EXPERT_ARRAY_SIZE          3
+
+/*****************************************************************************
+*  Alternative mode (When something goes wrong, the modules may be able to solve the problem.)
+*****************************************************************************/
+/*
+ * For commnication error in PM(deep sleep) state
+ */
+#define FTS_PATCH_COMERR_PM                     1
+#define FTS_TIMEOUT_COMERR_PM                   700
+
 
 /*****************************************************************************
 * Private enumerations, structures and unions using typedef
 *****************************************************************************/
 struct ftxxxx_proc {
 	struct proc_dir_entry *proc_entry;
+	struct proc_dir_entry *tp_lockdown_info_proc;
+	struct proc_dir_entry *tp_fw_version_proc;
+	struct proc_dir_entry *tp_test_data_proc;
+	struct proc_dir_entry *tp_test_result_proc;
+	struct proc_dir_entry *tp_selftest_proc;
+	struct proc_dir_entry *tp_data_dump_proc;
 	u8 opmode;
 	u8 cmd_len;
 	u8 cmd[FTX_MAX_COMMMAND_LENGTH];
@@ -127,6 +155,12 @@ struct fts_ts_platform_data {
 	u32 x_min;
 	u32 y_min;
 	u32 max_touch_number;
+	u32 open_min;
+#ifdef CONFIG_TOUCHSCREEN_XIAOMI_TOUCHFEATURE
+	u32 touch_range_array[5];
+	u32 touch_def_array[4];
+	u32 touch_expert_array[4 * EXPERT_ARRAY_SIZE];
+#endif
 };
 
 struct ts_event {
@@ -156,8 +190,12 @@ struct fts_ts_data {
 	struct mutex bus_lock;
 	int irq;
 	int log_level;
-	int fw_is_running; /* confirm fw is running when using spi:default 0 */
+	int fw_is_running;      /* confirm fw is running when using spi:default 0 */
 	int dummy_byte;
+#if defined(CONFIG_PM) && FTS_PATCH_COMERR_PM
+	struct completion pm_completion;
+	bool pm_suspend;
+#endif
 	bool suspended;
 	bool fw_loading;
 	bool irq_disabled;
@@ -165,13 +203,12 @@ struct fts_ts_data {
 	bool glove_mode;
 	bool cover_mode;
 	bool charger_mode;
-	bool gesture_mode; /* gesture enable or disable, default: disable */
-	int report_rate;
-
+	bool gesture_mode;      /* gesture enable or disable, default: disable */
 	/* multi-touch */
 	struct ts_event *events;
 	u8 *bus_tx_buf;
 	u8 *bus_rx_buf;
+	int bus_type;
 	u8 *point_buf;
 	int pnt_buf_size;
 	int touchs;
@@ -180,17 +217,47 @@ struct fts_ts_data {
 	int point_num;
 	struct regulator *vdd;
 	struct regulator *vcc_i2c;
+	u8 lockdown_info[FTS_LOCKDOWN_INFO_SIZE];
 #if FTS_PINCTRL_EN
 	struct pinctrl *pinctrl;
 	struct pinctrl_state *pins_active;
 	struct pinctrl_state *pins_suspend;
 	struct pinctrl_state *pins_release;
 #endif
-#if defined(CONFIG_FB) || defined(CONFIG_DRM)
+#if defined(CONFIG_DRM)
 	struct notifier_block fb_notif;
 #elif defined(CONFIG_HAS_EARLYSUSPEND)
 	struct early_suspend early_suspend;
 #endif
+	struct dentry *tpdbg_dentry;
+	bool poweroff_on_sleep;
+	/* power supply */
+	struct mutex power_supply_lock;
+	struct work_struct power_supply_work;
+	struct notifier_block power_supply_notifier;
+
+#ifdef CONFIG_TOUCHSCREEN_XIAOMI_TOUCHFEATURE
+	u8 gesture_status;
+	bool gamemode_enabled;
+	struct mutex cmd_update_mutex;
+	int palm_sensor_switch;
+	bool power_status;
+	bool is_expert_mode;
+#endif
+
+};
+
+enum GESTURE_MODE_TYPE {
+	GESTURE_DOUBLETAP,
+	GESTURE_AOD,
+};
+
+
+enum _FTS_BUS_TYPE {
+	BUS_TYPE_NONE,
+	BUS_TYPE_I2C,
+	BUS_TYPE_SPI,
+	BUS_TYPE_SPI_V2,
 };
 
 /*****************************************************************************
@@ -216,8 +283,9 @@ int fts_gesture_suspend(struct fts_ts_data *ts_data);
 int fts_gesture_resume(struct fts_ts_data *ts_data);
 
 /* Apk and functions */
-int fts_create_apk_debug_channel(struct fts_ts_data *);
-void fts_release_apk_debug_channel(struct fts_ts_data *);
+int fts_create_proc(struct fts_ts_data *ts_data);
+void fts_remove_proc(struct fts_ts_data *ts_data);
+
 
 /* ADB functions */
 int fts_create_sysfs(struct fts_ts_data *ts_data);
@@ -234,6 +302,11 @@ int fts_esdcheck_suspend(void);
 int fts_esdcheck_resume(void);
 #endif
 
+/* Production test */
+#if FTS_TEST_EN
+int fts_test_init(struct fts_ts_data *ts_data);
+int fts_test_exit(struct fts_ts_data *ts_data);
+#endif
 
 /* Point Report Check*/
 #if FTS_POINT_REPORT_CHECK_EN

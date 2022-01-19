@@ -2,7 +2,7 @@
  *
  * FocalTech TouchScreen driver.
  *
- * Copyright (c) 2012-2019, FocalTech Systems, Ltd., all rights reserved.
+ * Copyright (c) 2012-2020, FocalTech Systems, Ltd., all rights reserved.
  *
  * This software is licensed under the terms of the GNU General Public
  * License version 2, as published by the Free Software Foundation, and
@@ -55,7 +55,7 @@
 static void fts_prc_func(struct work_struct *work)
 {
 	struct fts_ts_data *ts_data = container_of(work,
-					struct fts_ts_data, prc_work.work);
+								  struct fts_ts_data, prc_work.work);
 	struct input_dev *input_dev = ts_data->input_dev;
 #if FTS_MT_PROTOCOL_B_EN
 	u32 finger_count = 0;
@@ -92,7 +92,7 @@ void fts_prc_queue_work(struct fts_ts_data *ts_data)
 {
 	cancel_delayed_work_sync(&ts_data->prc_work);
 	queue_delayed_work(ts_data->ts_workqueue, &ts_data->prc_work,
-			msecs_to_jiffies(POINT_REPORT_CHECK_WAIT_TIME));
+					   msecs_to_jiffies(POINT_REPORT_CHECK_WAIT_TIME));
 }
 
 /*****************************************************************************
